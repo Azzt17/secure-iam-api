@@ -3,7 +3,9 @@ package middleware
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -73,5 +75,87 @@ func Logger(next http.Handler) http.Handler {
 		// catat setelah handler utama selesai
 		durasi := time.Since(start)
 		log.Printf("[LOG] ID: %s | %s %s | Durasi: %v", reqID, r.Method, r.URL.Path, durasi)
+	})
+}
+
+// Middleware 4: Security Headers (Browser Protection)
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// mencegah MIME Sniffing -> memaksa browser mengikuti context-type dari server
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		// mencegah clickjacking -> tidak boleh di masukkan kedalam iframe oleh situs lain
+		w.Header().Set("X-Frame-Options", "DENY")
+		// memaksa HTTPS selama 1 tahun
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; indcludeSubDomains")
+		// membatasi resource apa saja yg boleh di muat browser -> mitigasi XSS
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Middleware 5: CORS (Cross-Origin Resource Sharing)
+func CORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// di prod ganti "*" dengan domain frontend
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Method", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+
+		// jika browser melakukan preflight request/options Method
+		// langsung balas ok (200) tanpa mengeksekusi handler utama
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Middleware 6: Rate Limiting (Anti Bruteforce & DoS)
+// ini dibuat in-memory menggunakan sync.Mutex
+type RateLimiter struct {
+	visitor map[string]int // menyimpan jumlah request per ip
+	mu      sync.Mutex
+}
+
+// Global instance utk rate limter (allow 5 request per ip)
+var limiter = &RateLimiter{
+	visitor: make(map[string]int),
+}
+
+// simulasi reset limiter per 10 detik (di prod bisa pke Redis)
+func init() {
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			limiter.mu.Lock()
+			limiter.visitor = make(map[string]int) // reset map
+			limiter.mu.Unlock()
+		}
+	}()
+}
+
+func RateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// mengambil ip, di prod cek juga X-Forwarded-For kalau pakai Nginx/Cloudflare
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			ip = r.RemoteAddr
+		}
+
+		limiter.mu.Lock()
+		limiter.visitor[ip]++
+		count := limiter.visitor[ip]
+		limiter.mu.Unlock()
+
+		// jika req lebih dari 5 dalam 10 detik, di tolak
+		if count > 5 {
+			http.Error(w, "Rate limit exceeded. Coba lagi nanti.", http.StatusTooManyRequests)
+			return
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }

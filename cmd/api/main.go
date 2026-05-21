@@ -33,12 +33,15 @@ func main() {
 	})
 
 	// memasang penghubung middleware
-	// urutan: recover -> requestID -> logger -> mux
+	// urutan: Recover -> Logger -> Ratelimit -> CORS -> SecurityHeaders
 	secureHandler := middleware.Chain(
 		mux,
 		middleware.Recover,
 		middleware.RequestID,
 		middleware.Logger,
+		middleware.RateLimit,
+		middleware.CORS,
+		middleware.SecurityHeaders,
 	)
 
 	// ubah handler dari mux menjadi secureHandler

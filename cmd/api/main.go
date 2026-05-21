@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"secure-iam-api/internal/middleware"
 )
 
 // simulasi database in-memory
@@ -25,18 +27,30 @@ func main() {
 	mux.HandleFunc("/health", healthCheckHandler)
 	mux.HandleFunc("/wallet/deduct", deductWalletHandler)
 
-	// konfigurasi server
-	// jangan gunakan http.ListenAndServer(":8080", mux) secara langsung
-	// selalu definisikan timeout untuk mencegah slowloris DoS
+	// endpoint pengujian recovery middleware
+	mux.HandleFunc("/panic", func(w http.ResponseWriter, r *http.Request) {
+		panic("Database meledak karena memory leak!")
+	})
+
+	// memasang penghubung middleware
+	// urutan: recover -> requestID -> logger -> mux
+	secureHandler := middleware.Chain(
+		mux,
+		middleware.Recover,
+		middleware.RequestID,
+		middleware.Logger,
+	)
+
+	// ubah handler dari mux menjadi secureHandler
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      mux,
+		Handler:      secureHandler,
 		ReadTimeout:  5 * time.Second,   // batas waktu membaca request client
 		WriteTimeout: 10 * time.Second,  // batas waktu server membalas
 		IdleTimeout:  120 * time.Second, // batas waktu koneksi tetap hidup
 	}
 
-	log.Println("Secure IAM API berjalan di port :8080...")
+	log.Println("Secure IAM API berjalan di port :8080 dengan Middleware...")
 
 	// mulai menerima request,
 	// fungsi ini akan memblokir jalannya program sampai server di matikan

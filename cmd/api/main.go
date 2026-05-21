@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"secure-iam-api/internal/auth"
 	"secure-iam-api/internal/middleware"
 )
 
@@ -15,6 +16,19 @@ type WalletDB struct {
 	mu      sync.RWMutex // mengamankan shared state dari race condition
 	balance int
 }
+
+// entity user
+type User struct {
+	Username     string
+	PasswordHash string // jgn menyimpan password mentah
+	Role         string
+}
+
+// database user
+var userDB = struct {
+	mu    sync.RWMutex
+	users map[string]User
+}{users: make(map[string]User)}
 
 // inisialisasi saldo awal sistem
 var masterWallet = &WalletDB{balance: 1000}
@@ -31,6 +45,8 @@ func main() {
 	mux.HandleFunc("/panic", func(w http.ResponseWriter, r *http.Request) {
 		panic("Database meledak karena memory leak!")
 	})
+
+	mux.HandleFunc("/register", registerHandler)
 
 	// memasang penghubung middleware
 	// urutan: Recover -> Logger -> Ratelimit -> CORS -> SecurityHeaders
@@ -105,4 +121,67 @@ func deductWalletHandler(w http.ResponseWriter, r *http.Request) {
 
 	// jika saldo kurang, kirim bad request
 	http.Error(w, "Saldo tidak mencukupi", http.StatusBadRequest)
+}
+
+// pemetaan JSON req dari client
+type RegisterRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// parsing payload JSON dari client
+	var req RegisterRequest
+	// limit body size
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576) // max 1 MB
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request: Format JSON tidak valid", http.StatusBadRequest)
+		return
+	}
+
+	// validasi dasar
+	if req.Username == "" || len(req.Password) < 6 {
+		http.Error(w, "Bad Request: Username kosong atau password kurang dari 4 karakter", http.StatusBadRequest)
+		return
+	}
+
+	// cek apakah user sudah ada (gunakan RLOCK utk read)
+	userDB.mu.RLock()
+	_, exists := userDB.users[req.Username]
+	userDB.mu.RUnlock()
+
+	if exists {
+		http.Error(w, "Conflict: Username sudah terdaftar", http.StatusConflict)
+		return
+	}
+
+	// kriptografi
+	hashedPassword, err := auth.HashPassword(req.Password)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// simpan ke database (gunakan lock utk write)
+	userDB.mu.Lock()
+	userDB.users[req.Username] = User{
+		Username:     req.Username,
+		PasswordHash: hashedPassword,
+		Role:         "user", // default role
+	}
+	userDB.mu.Unlock()
+
+	// respons
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "User berhasil didaftarkan",
+	})
 }

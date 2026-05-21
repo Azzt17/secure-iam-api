@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -34,4 +35,23 @@ func GenerateJWT(username, role string) (string, error) {
 
 	// digital signature dgn secret key
 	return token.SignedString(jwtSecretKey)
+}
+
+// fungsi untuk mengecek JWT token
+func ValidateJWT(tokenString string) (*CustomClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+		// mitigasi khusus utk: 'alg: none' attack
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("metode penandatanganan tidak valid")
+		}
+		return jwtSecretKey, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// pastikan token blm expired dan claims bisa diekstrak
+	if claims, ok := token.Claims.(*CustomClaims); ok && token.Valid {
+		return claims, nil
+	}
+	return nil, errors.New("token tidak valid")
 }

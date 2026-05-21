@@ -37,15 +37,19 @@ func main() {
 	// multiplexer
 	mux := http.NewServeMux()
 
-	// registrasi endpoint
+	// endpoint publik (tidak butuh token)
 	mux.HandleFunc("/health", healthCheckHandler)
-	mux.HandleFunc("/wallet/deduct", deductWalletHandler)
+	mux.HandleFunc("/register", registerHandler)
+	mux.HandleFunc("/login", loginHandler)
+
+	// endpoint private (RequireAuth)
+	secureWalletHandler := middleware.RequireAuth(http.HandlerFunc(deductWalletHandler))
+	mux.Handle("/wallet/deduct", secureWalletHandler)
+
 	// endpoint pengujian recovery middleware
 	mux.HandleFunc("/panic", func(w http.ResponseWriter, r *http.Request) {
 		panic("Database meledak karena memory leak!")
 	})
-	mux.HandleFunc("/register", registerHandler)
-	mux.HandleFunc("/login", loginHandler)
 
 	// memasang penghubung middleware
 	// urutan: Recover -> Logger -> Ratelimit -> CORS -> SecurityHeaders

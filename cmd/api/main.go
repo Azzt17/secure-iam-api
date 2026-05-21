@@ -40,13 +40,12 @@ func main() {
 	// registrasi endpoint
 	mux.HandleFunc("/health", healthCheckHandler)
 	mux.HandleFunc("/wallet/deduct", deductWalletHandler)
-
 	// endpoint pengujian recovery middleware
 	mux.HandleFunc("/panic", func(w http.ResponseWriter, r *http.Request) {
 		panic("Database meledak karena memory leak!")
 	})
-
 	mux.HandleFunc("/register", registerHandler)
+	mux.HandleFunc("/login", loginHandler)
 
 	// memasang penghubung middleware
 	// urutan: Recover -> Logger -> Ratelimit -> CORS -> SecurityHeaders
@@ -183,5 +182,67 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "User berhasil didaftarkan",
+	})
+}
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// parsing payload JSON
+	var req LoginRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	// cari user di database
+	userDB.mu.RLock()
+	user, exist := userDB.users[req.Username]
+	userDB.mu.RUnlock()
+
+	// opaque Error
+	if !exist {
+		http.Error(w, "Kredensial tidak valid", http.StatusUnauthorized)
+		return
+	}
+
+	// validasi password
+	if !auth.CheckPasswordHash(req.Password, user.PasswordHash) {
+		http.Error(w, "Kredensial tidak valid", http.StatusUnauthorized)
+		return
+	}
+
+	// generate JWT
+	tokenString, err := auth.GenerateJWT(user.Username, user.Role)
+	if err != nil {
+		http.Error(w, "Gagal membuat sesi", http.StatusInternalServerError)
+		return
+	}
+
+	// secure session managament
+	// tokennya tdk di kirim via JSON body, melainkan via Cookie yg dikunci
+	http.SetCookie(w, &http.Cookie{
+		Name:     "access_token",
+		Value:    tokenString,
+		Expires:  time.Now().Add(1 * time.Hour),
+		HttpOnly: true,  // tdk bisa di baca javascript -> mitigasi XSS
+		Secure:   false, // set ke true kalau sdh pakai HTTPS di production
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Login berhasil",
 	})
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -71,20 +72,31 @@ func main() {
 		middleware.SecurityHeaders,
 	)
 
-	// ubah handler dari mux menjadi secureHandler
+	// konfigurasi keamanan transport layer
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12, // versi di bawah ini rentan
+		CurvePreferences: []tls.CurveID{
+			tls.CurveP521,
+			tls.CurveP384,
+			tls.CurveP256,
+		},
+	}
+
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         ":8443",
 		Handler:      secureHandler,
+		TLSConfig:    tlsConfig,
 		ReadTimeout:  5 * time.Second,   // batas waktu membaca request client
 		WriteTimeout: 10 * time.Second,  // batas waktu server membalas
 		IdleTimeout:  120 * time.Second, // batas waktu koneksi tetap hidup
 	}
 
-	log.Println("Secure IAM API berjalan di port :8080 dengan Middleware...")
+	log.Println("Secure IAM API berjalan di port :8443...")
 
 	// mulai menerima request,
 	// fungsi ini akan memblokir jalannya program sampai server di matikan
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	// *menggunakan sertifikat keamanan terenkripsi
+	if err := srv.ListenAndServeTLS("certs/server.crt", "certs/server.key"); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server mati secara tidak wajar: %v", err)
 	}
 }
@@ -276,8 +288,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		Name:     "access_token",
 		Value:    tokenString,
 		Expires:  time.Now().Add(1 * time.Hour),
-		HttpOnly: true,  // tdk bisa di baca javascript -> mitigasi XSS
-		Secure:   false, // set ke true kalau sdh pakai HTTPS di production
+		HttpOnly: true, // tdk bisa di baca javascript -> mitigasi XSS
+		Secure:   true, // sudah menggunakan HTTPS (tls)
 		SameSite: http.SameSiteStrictMode,
 		Path:     "/",
 	})

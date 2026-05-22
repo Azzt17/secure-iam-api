@@ -1,0 +1,5 @@
+# Mengabaikan private key keamanan transport
+certs/server.key
+
+# Mengabaikan file log pengujian sesi curl
+cookies.txt

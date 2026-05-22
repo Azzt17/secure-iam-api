@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"secure-iam-api/internal/auth"
+	"secure-iam-api/internal/db"
 	"secure-iam-api/internal/middleware"
 
 	"github.com/go-playground/validator/v10"
@@ -43,6 +44,9 @@ var userDB = struct {
 var masterWallet = &WalletDB{balance: 1000}
 
 func main() {
+	// nyalakan database
+	db.InitDB()
+
 	// multiplexer
 	mux := http.NewServeMux()
 

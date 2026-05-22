@@ -9,7 +9,15 @@ import (
 
 	"secure-iam-api/internal/auth"
 	"secure-iam-api/internal/middleware"
+
+	"github.com/go-playground/validator/v10"
 )
+
+var validate *validator.Validate
+
+func init() {
+	validate = validator.New()
+}
 
 // simulasi database in-memory
 type WalletDB struct {
@@ -82,6 +90,15 @@ func main() {
 }
 
 // -------- Handlers ------------
+
+func formatValidationError(err error) map[string]string {
+	errs := make(map[string]string)
+	for _, err := range err.(validator.ValidationErrors) {
+		errs[err.Field()] = "Format tidak valid (Gagal pada aturan: " + err.Tag() + ")"
+	}
+	return errs
+}
+
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	// filter method: endpoint ini hanya menerima get
 	if r.Method != http.MethodGet {
@@ -128,8 +145,8 @@ func deductWalletHandler(w http.ResponseWriter, r *http.Request) {
 
 // pemetaan JSON req dari client
 type RegisterRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string `json:"username" validate:"required,alphanum,min=4,max=32"`
+	Password string `json:"password" validate:"required,min=8"`
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
@@ -149,8 +166,18 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// validasi dasar
-	if req.Username == "" || len(req.Password) < 6 {
-		http.Error(w, "Bad Request: Username kosong atau password kurang dari 4 karakter", http.StatusBadRequest)
+	//	if req.Username == "" || len(req.Password) < 6 {
+	//		http.Error(w, "Bad Request: Username kosong atau password kurang dari 4 karakter", http.StatusBadRequest)
+	//		return
+	//	}
+	// Security validator
+	if err := validate.Struct(req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity) // http 422
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   "Validasi Input Gagal",
+			"details": formatValidationError(err),
+		})
 		return
 	}
 
@@ -190,8 +217,8 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string `json:"username" validate:"required,alphanum,min=4,max=32"`
+	Password string `json:"password" validate:"required"`
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +232,17 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	// Security Validator
+	if err := validate.Struct(req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity) // http 422
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   "Validasi Input Gagal",
+			"details": formatValidationError(err),
+		})
 		return
 	}
 

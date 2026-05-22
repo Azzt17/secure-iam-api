@@ -86,7 +86,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		// mencegah clickjacking -> tidak boleh di masukkan kedalam iframe oleh situs lain
 		w.Header().Set("X-Frame-Options", "DENY")
 		// memaksa HTTPS selama 1 tahun
-		w.Header().Set("Strict-Transport-Security", "max-age=31536000; indcludeSubDomains")
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		// membatasi resource apa saja yg boleh di muat browser -> mitigasi XSS
 		w.Header().Set("Content-Security-Policy", "default-src 'self'")
 
@@ -99,7 +99,7 @@ func CORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// di prod ganti "*" dengan domain frontend
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Method", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 
 		// jika browser melakukan preflight request/options Method

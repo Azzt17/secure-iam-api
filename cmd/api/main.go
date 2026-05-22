@@ -4,9 +4,9 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
 	"secure-iam-api/internal/auth"
@@ -21,15 +21,6 @@ var validate *validator.Validate
 func init() {
 	validate = validator.New()
 }
-
-// simulasi database in-memory
-type WalletDB struct {
-	mu      sync.RWMutex // mengamankan shared state dari race condition
-	balance int
-}
-
-// inisialisasi saldo awal sistem
-var masterWallet = &WalletDB{balance: 1000}
 
 func main() {
 	// nyalakan database
@@ -122,29 +113,70 @@ func deductWalletHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// mencegah Time-of-Check to Time-of-Use (TOCTOU)
-	// mengunci memori agar tidak ada goroutine lain yg bisa melakukan write saldo
-	// di saat yg sama
-	masterWallet.mu.Lock()
-	defer masterWallet.mu.Unlock()
-
-	if masterWallet.balance >= 100 {
-		// simulasi delay pemrosesan database
-		time.Sleep(10 * time.Millisecond)
-
-		masterWallet.balance -= 100
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":     "succes",
-			"message":    "Saldo berhasil dipotong 100",
-			"sisa_saldo": masterWallet.balance,
-		})
+	// 1. otorisasi -> ekstrak JWT CLaims dari middleware
+	claims, ok := r.Context().Value(middleware.UserContextKey).(*auth.CustomClaims)
+	if !ok {
+		http.Error(w, "Unauthorized: Gagal memvalidasi identitas", http.StatusUnauthorized)
 		return
 	}
 
-	// jika saldo kurang, kirim bad request
-	http.Error(w, "Saldo tidak mencukupi", http.StatusBadRequest)
+	// 2. atomicity -> mulai transaksi database
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		log.Printf("Gagal memulai transaksi: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// mekanisme pengaman -> jika fungsi ini return karena error sebelum tx.Commit di panggil,
+	// tx.Rollback() akan tereksekusi dan membatalkan perubahan di memori sementara
+	defer tx.Rollback()
+
+	// 3. ambil id pengguna dari DB berdasarkan JWT username
+	var userID int
+	err = tx.QueryRow("SELECT id FROM users WHERE username = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "User tidak ditemukan di database", http.StatusNotFound)
+		return
+	}
+
+	// 4. TOCTOU mitigation utk mengatasi ekspoitasi Race Condition
+	var currentBalance int
+	err = tx.QueryRow("SELECT balance FROM wallets WHERE user_id = $1 FOR UPDATE", userID).Scan(&currentBalance)
+	if err != nil {
+		http.Error(w, "Dompet tidak ditemukan", http.StatusNotFound)
+		return
+	}
+
+	// 5. Cek Saldo -> time of check
+	deductAmount := 100
+	if currentBalance < deductAmount {
+		http.Error(w, "Bad Request: Saldo tidak mencukupi", http.StatusBadRequest)
+		return // memicu rollback
+	}
+
+	// 6. Potong saldo -> time of use
+	newBalance := currentBalance - deductAmount
+	_, err = tx.Exec("UPDATE wallets SET balance = $1 WHERE user_id = $2", newBalance, userID)
+	if err != nil {
+		log.Printf("Gagal memotong saldo: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return // memicu rollback
+	}
+
+	// 7. Menulis data
+	if err = tx.Commit(); err != nil {
+		log.Printf("Gagal melakukan commit transaksi: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("Saldo berhasil di potong %d, Sisa saldo: %d", deductAmount, newBalance),
+	})
 }
 
 // pemetaan JSON req dari client

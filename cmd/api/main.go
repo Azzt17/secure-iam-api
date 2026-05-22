@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -26,19 +27,6 @@ type WalletDB struct {
 	mu      sync.RWMutex // mengamankan shared state dari race condition
 	balance int
 }
-
-// entity user
-type User struct {
-	Username     string
-	PasswordHash string // jgn menyimpan password mentah
-	Role         string
-}
-
-// database user
-var userDB = struct {
-	mu    sync.RWMutex
-	users map[string]User
-}{users: make(map[string]User)}
 
 // inisialisasi saldo awal sistem
 var masterWallet = &WalletDB{balance: 1000}
@@ -197,10 +185,15 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// cek apakah user sudah ada (gunakan RLOCK utk read)
-	userDB.mu.RLock()
-	_, exists := userDB.users[req.Username]
-	userDB.mu.RUnlock()
+	// cek ketersediaan user menggunakan parameterized query
+	var exists bool
+	checkQuery := "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)"
+	err := db.Conn.QueryRow(checkQuery, req.Username).Scan(&exists)
+	if err != nil {
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
 	if exists {
 		http.Error(w, "Conflict: Username sudah terdaftar", http.StatusConflict)
@@ -214,14 +207,25 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// simpan ke database (gunakan lock utk write)
-	userDB.mu.Lock()
-	userDB.users[req.Username] = User{
-		Username:     req.Username,
-		PasswordHash: hashedPassword,
-		Role:         "user", // default role
+	// simpan user ke database dan ambil ID menggunakan RETURN
+	var userID int
+	insertUserQuery := "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id"
+	err = db.Conn.QueryRow(insertUserQuery, req.Username, hashedPassword, "user").Scan(&userID)
+	if err != nil {
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
-	userDB.mu.Unlock()
+
+	// buat wallet otomatis untuk user baru agar memiliki relasi (foreign key)
+	// saldo awal: 1000
+	insertWalletQuery := "INSERT INTO wallets (user_id, balance) VALUES ($1, $2)"
+	_, err = db.Conn.Exec(insertWalletQuery, userID, 1000)
+	if err != nil {
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
 	// respons
 	w.Header().Set("Content-Type", "application/json")
@@ -262,25 +266,32 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// cari user di database
-	userDB.mu.RLock()
-	user, exist := userDB.users[req.Username]
-	userDB.mu.RUnlock()
+	// tempat menampung data dari baris database
+	var dbUsername string
+	var dbPasswordHash string
+	var dbRole string
 
-	// opaque Error
-	if !exist {
-		http.Error(w, "Kredensial tidak valid", http.StatusUnauthorized)
+	// query data berdasarkan satu parameter ($1)
+	loginQuery := "SELECT username, password_hash, role FROM users WHERE username = $1"
+	err := db.Conn.QueryRow(loginQuery, req.Username).Scan(&dbUsername, &dbPasswordHash, &dbRole)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Kredensial tidak valid", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	// validasi password
-	if !auth.CheckPasswordHash(req.Password, user.PasswordHash) {
+	if !auth.CheckPasswordHash(req.Password, dbPasswordHash) {
 		http.Error(w, "Kredensial tidak valid", http.StatusUnauthorized)
 		return
 	}
 
 	// generate JWT
-	tokenString, err := auth.GenerateJWT(user.Username, user.Role)
+	tokenString, err := auth.GenerateJWT(dbUsername, dbRole)
 	if err != nil {
 		http.Error(w, "Gagal membuat sesi", http.StatusInternalServerError)
 		return

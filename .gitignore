@@ -3,3 +3,5 @@ certs/server.key
 
 # Mengabaikan file log pengujian sesi curl
 cookies.txt
+
+.env

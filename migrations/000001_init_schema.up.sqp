@@ -1,0 +1,16 @@
+-- tabel pengguna
+CREATE TABLE users (
+  id SERIAL PRIMARY KEY,
+  username VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(20) NOT NULL DEFAULT 'user',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- tabel digital e-wallet with relation
+CREATE TABLE wallets (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  balance BIGINT NOT NULL DEFAULT 0,
+  update_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

@@ -32,26 +32,26 @@ func main() {
 	// Inisialisasi Validator
 	validate := validator.New()
 
+	// root context utk kontrol Background task
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+	rateLimiter := middleware.NewRateLimiter(rootCtx)
+
 	// DEPENDENCY INJECTION
 	// Suntikkan koneksi DB ke Repository
 	repo := repository.NewPostgresRepository(db.Conn)
 	// Suntikkan Repository ke Service
 	svc := service.NewIAMService(repo)
-	// Suntikkan Service dan Validator ke Handler
-	iamHandler := handler.NewIAMHandler(svc, validate)
 
-	// Konfigurasi Router (ServeMux)
+	// Inisialisasi router dan handlers
 	mux := http.NewServeMux()
+	iamHandler := handler.NewIAMHandler(svc, validate)
 
 	// Endpoint Health
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-
-	// context utk rate limiter
-	ctx := context.Background()
-	rateLimiter := middleware.NewRateLimiter(ctx)
 
 	// Rute Publik (Dilindungi Rate Limiter)
 	mux.Handle("/register", rateLimiter(http.HandlerFunc(iamHandler.Register)))
@@ -105,10 +105,13 @@ func main() {
 
 	log.Println("Sinyal penghentian diterima. Mematikan server secara perlahan (Graceful Shutdown)...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// picu pembatalan root context
+	rootCancel()
 
-	if err := server.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server dipaksa mati karena timeout: %v", err)
 	}
 

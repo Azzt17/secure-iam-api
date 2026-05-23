@@ -134,46 +134,6 @@ type RateLimiter struct {
 	mu      sync.Mutex
 }
 
-// Global instance utk rate limter (allow 5 request per ip)
-//var limiter = &RateLimiter{
-//	visitor: make(map[string]int),
-//}
-
-// simulasi reset limiter per 10 detik (di prod bisa pke Redis)
-//func init() {
-//	go func() {
-//		for {
-//			time.Sleep(10 * time.Second)
-//			limiter.mu.Lock()
-//			limiter.visitor = make(map[string]int) // reset map
-//			limiter.mu.Unlock()
-//		}
-//	}()
-//}
-
-//func RateLimit(next http.Handler) http.Handler {
-//	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-//		// mengambil ip, di prod cek juga X-Forwarded-For kalau pakai Nginx/Cloudflare
-//		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-//		if err != nil {
-//			ip = r.RemoteAddr
-//		}
-//
-//		limiter.mu.Lock()
-//		limiter.visitor[ip]++
-//		count := limiter.visitor[ip]
-//		limiter.mu.Unlock()
-//
-//		// jika req lebih dari 5 dalam 10 detik, di tolak
-//		if count > 5 {
-//			http.Error(w, "Rate limit exceeded. Coba lagi nanti.", http.StatusTooManyRequests)
-//			return
-//		}
-//
-//		next.ServeHTTP(w, r)
-//	})
-//}
-
 func NewRateLimiter(ctx context.Context) func(http.Handler) http.Handler {
 	limiter := &RateLimiter{
 		visitor: make(map[string]int),

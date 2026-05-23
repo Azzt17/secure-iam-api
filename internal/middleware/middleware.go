@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -97,10 +98,15 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // Middleware 5: CORS (Cross-Origin Resource Sharing)
 func CORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// di prod ganti "*" dengan domain frontend
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		// hanya izinkan domain yg terdaftar di environtment
+		allowedOrigin := os.Getenv("FRONTEND_URL")
+		if allowedOrigin == "" {
+			allowedOrigin = "https://localhost:3000" // safe fallback
+		}
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		// jika browser melakukan preflight request/options Method
 		// langsung balas ok (200) tanpa mengeksekusi handler utama

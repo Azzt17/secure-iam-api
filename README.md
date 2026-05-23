@@ -77,7 +77,7 @@ Masuk ke PostgreSQL dan siapkan basis data beserta user dengan akses terbatas:
 
 ```sql
 CREATE DATABASE iam_wallet_db;
-CREATE USER iam_app WITH PASSWORD 'sandisangatkuat';
+CREATE USER iam_app WITH PASSWORD '<your_dbpassword>';
 GRANT ALL PRIVILEGES ON DATABASE iam_wallet_db TO iam_app;
 -- Masuk ke database iam_wallet_db lalu jalankan:
 GRANT ALL ON SCHEMA public TO iam_app;
@@ -88,7 +88,7 @@ GRANT ALL ON SCHEMA public TO iam_app;
 Jalankan perintah ini untuk membangun tabel `users` dan `wallets` secara otomatis:
 
 ```bash
-migrate -path migrations -database "postgres://iam_app:sandisangatkuat@localhost:5432/iam_wallet_db?sslmode=disable" up
+migrate -path migrations -database "postgres://iam_app:<your_dbpassword>@localhost:5432/iam_wallet_db?sslmode=disable" up
 ```
 
 ### 4. Variabel Lingkungan (`.env`)
@@ -96,12 +96,14 @@ migrate -path migrations -database "postgres://iam_app:sandisangatkuat@localhost
 Buat file `.env` di direktori root proyek dengan konfigurasi berikut:
 
 ```env
-DB_HOST=localhost
+DB_HOST=<your_db_url>
 DB_PORT=5432
 DB_USER=iam_app
-DB_PASSWORD=sandisangatkuat
+DB_PASSWORD=<your_dbpassword>
 DB_NAME=iam_wallet_db
-JWT_SECRET=rahasia_jwt_super_aman_sekali_123!
+JWT_SECRET=<your_jwt_secret>
+DB_SSLMODE=disable/enable
+FRONTEND_URL=<your_frontend_url>
 ```
 
 ### 5. Membangun Kriptografi Transport (TLS)

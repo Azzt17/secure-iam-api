@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"database/sql"
 	"encoding/json"
@@ -87,11 +88,19 @@ func main() {
 // -------- Handlers ------------
 
 func formatValidationError(err error) map[string]string {
-	errs := make(map[string]string)
-	for _, err := range err.(validator.ValidationErrors) {
-		errs[err.Field()] = "Format tidak valid (Gagal pada aturan: " + err.Tag() + ")"
+	errors := make(map[string]string)
+
+	// safe type assertion utk mencegah runtime panic
+	if ve, ok := err.(validator.ValidationErrors); ok {
+		for _, e := range ve {
+			errors[e.Field()] = fmt.Sprintf("Gagal pada aturan validasi %s", e.Tag())
+		}
+	} else {
+		// safe fallback
+		errors["general"] = "Terjadi kesalahan pada validasi data"
+		log.Printf("Non-validation error caught: %v", err)
 	}
-	return errs
+	return errors
 }
 
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
@@ -120,21 +129,24 @@ func deductWalletHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// batasi waktu eksekusi DB
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
 	// 2. atomicity -> mulai transaksi database
-	tx, err := db.Conn.Begin()
+	tx, err := db.Conn.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("Gagal memulai transaksi: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-
 	// mekanisme pengaman -> jika fungsi ini return karena error sebelum tx.Commit di panggil,
 	// tx.Rollback() akan tereksekusi dan membatalkan perubahan di memori sementara
 	defer tx.Rollback()
 
 	// 3. ambil id pengguna dari DB berdasarkan JWT username
 	var userID int
-	err = tx.QueryRow("SELECT id FROM users WHERE username = $1", claims.Username).Scan(&userID)
+	err = tx.QueryRowContext(ctx, "SELECT id FROM users WHERE username = $1", claims.Username).Scan(&userID)
 	if err != nil {
 		http.Error(w, "User tidak ditemukan di database", http.StatusNotFound)
 		return
@@ -142,7 +154,7 @@ func deductWalletHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 4. TOCTOU mitigation utk mengatasi ekspoitasi Race Condition
 	var currentBalance int
-	err = tx.QueryRow("SELECT balance FROM wallets WHERE user_id = $1 FOR UPDATE", userID).Scan(&currentBalance)
+	err = tx.QueryRowContext(ctx, "SELECT balance FROM wallets WHERE user_id = $1 FOR UPDATE", userID).Scan(&currentBalance)
 	if err != nil {
 		http.Error(w, "Dompet tidak ditemukan", http.StatusNotFound)
 		return
@@ -157,7 +169,7 @@ func deductWalletHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 6. Potong saldo -> time of use
 	newBalance := currentBalance - deductAmount
-	_, err = tx.Exec("UPDATE wallets SET balance = $1 WHERE user_id = $2", newBalance, userID)
+	_, err = tx.ExecContext(ctx, "UPDATE wallets SET balance = $1 WHERE user_id = $2", newBalance, userID)
 	if err != nil {
 		log.Printf("Gagal memotong saldo: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -217,10 +229,14 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// batasi waktu eksekusi DB
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
 	// cek ketersediaan user menggunakan parameterized query
 	var exists bool
 	checkQuery := "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)"
-	err := db.Conn.QueryRow(checkQuery, req.Username).Scan(&exists)
+	err := db.Conn.QueryRowContext(ctx, checkQuery, req.Username).Scan(&exists)
 	if err != nil {
 		log.Printf("Database error: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -242,7 +258,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	// simpan user ke database dan ambil ID menggunakan RETURN
 	var userID int
 	insertUserQuery := "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id"
-	err = db.Conn.QueryRow(insertUserQuery, req.Username, hashedPassword, "user").Scan(&userID)
+	err = db.Conn.QueryRowContext(ctx, insertUserQuery, req.Username, hashedPassword, "user").Scan(&userID)
 	if err != nil {
 		log.Printf("Database error: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -252,7 +268,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	// buat wallet otomatis untuk user baru agar memiliki relasi (foreign key)
 	// saldo awal: 1000
 	insertWalletQuery := "INSERT INTO wallets (user_id, balance) VALUES ($1, $2)"
-	_, err = db.Conn.Exec(insertWalletQuery, userID, 1000)
+	_, err = db.Conn.ExecContext(ctx, insertWalletQuery, userID, 1000)
 	if err != nil {
 		log.Printf("Database error: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -303,9 +319,13 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var dbPasswordHash string
 	var dbRole string
 
+	// batasi waktu eksekusi db
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
 	// query data berdasarkan satu parameter ($1)
 	loginQuery := "SELECT username, password_hash, role FROM users WHERE username = $1"
-	err := db.Conn.QueryRow(loginQuery, req.Username).Scan(&dbUsername, &dbPasswordHash, &dbRole)
+	err := db.Conn.QueryRowContext(ctx, loginQuery, req.Username).Scan(&dbUsername, &dbPasswordHash, &dbRole)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Kredensial tidak valid", http.StatusUnauthorized)

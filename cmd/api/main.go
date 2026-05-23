@@ -1,369 +1,80 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
-	"database/sql"
-	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
 
-	"secure-iam-api/internal/auth"
 	"secure-iam-api/internal/db"
+	handler "secure-iam-api/internal/handlers"
 	"secure-iam-api/internal/middleware"
+	"secure-iam-api/internal/repository"
+	"secure-iam-api/internal/service"
 
 	"github.com/go-playground/validator/v10"
 )
 
-var validate *validator.Validate
-
-func init() {
-	validate = validator.New()
-}
-
 func main() {
-	// nyalakan database
+	// Inisialisasi Database
 	db.InitDB()
+	defer db.Conn.Close()
 
-	// multiplexer
+	// Inisialisasi Validator
+	validate := validator.New()
+
+	// DEPENDENCY INJECTION
+	// Suntikkan koneksi DB ke Repository
+	repo := repository.NewPostgresRepository(db.Conn)
+	// Suntikkan Repository ke Service
+	svc := service.NewIAMService(repo)
+	// Suntikkan Service dan Validator ke Handler
+	iamHandler := handler.NewIAMHandler(svc, validate)
+
+	// Konfigurasi Router (ServeMux)
 	mux := http.NewServeMux()
 
-	// endpoint publik (tidak butuh token)
-	mux.HandleFunc("/health", healthCheckHandler)
-	mux.HandleFunc("/register", registerHandler)
-	mux.HandleFunc("/login", loginHandler)
+	// Rute Publik (Dilindungi Rate Limiter)
+	mux.Handle("/register", middleware.RateLimit(http.HandlerFunc(iamHandler.Register)))
+	mux.Handle("/login", middleware.RateLimit(http.HandlerFunc(iamHandler.Login)))
 
-	// endpoint private (RequireAuth)
-	secureWalletHandler := middleware.RequireAuth(http.HandlerFunc(deductWalletHandler))
-	mux.Handle("/wallet/deduct", secureWalletHandler)
+	// Rute Privat (Dilindungi Rate Limiter + JWT Gatekeeper)
+	mux.Handle("/wallet/deduct", middleware.RateLimit(middleware.RequireAuth(http.HandlerFunc(iamHandler.DeductWallet))))
 
-	// endpoint pengujian recovery middleware
-	mux.HandleFunc("/panic", func(w http.ResponseWriter, r *http.Request) {
-		panic("Database meledak karena memory leak!")
-	})
+	// Dekorasi Layer 7 Terakhir (Security Headers, CORS, Panic Recovery, Logger)
+	var finalHandler http.Handler = mux
+	finalHandler = middleware.SecurityHeaders(finalHandler)
+	finalHandler = middleware.CORS(finalHandler)
+	finalHandler = middleware.Recover(finalHandler)
+	finalHandler = middleware.Logger(finalHandler)
 
-	// memasang penghubung middleware
-	// urutan: Recover -> Logger -> Ratelimit -> CORS -> SecurityHeaders
-	secureHandler := middleware.Chain(
-		mux,
-		middleware.Recover,
-		middleware.RequestID,
-		middleware.Logger,
-		middleware.RateLimit,
-		middleware.CORS,
-		middleware.SecurityHeaders,
-	)
-
-	// konfigurasi keamanan transport layer
+	// Konfigurasi Transport (TLS)
 	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12, // versi di bawah ini rentan
-		CurvePreferences: []tls.CurveID{
-			tls.CurveP521,
-			tls.CurveP384,
-			tls.CurveP256,
+		MinVersion:               tls.VersionTLS12,
+		PreferServerCipherSuites: true,
+		CurvePreferences:         []tls.CurveID{tls.X25519, tls.CurveP256},
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 		},
 	}
 
-	srv := &http.Server{
+	server := &http.Server{
 		Addr:         ":8443",
-		Handler:      secureHandler,
+		Handler:      finalHandler,
 		TLSConfig:    tlsConfig,
-		ReadTimeout:  5 * time.Second,   // batas waktu membaca request client
-		WriteTimeout: 10 * time.Second,  // batas waktu server membalas
-		IdleTimeout:  120 * time.Second, // batas waktu koneksi tetap hidup
+		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 
-	log.Println("Secure IAM API berjalan di port :8443...")
-
-	// mulai menerima request,
-	// fungsi ini akan memblokir jalannya program sampai server di matikan
-	// *menggunakan sertifikat keamanan terenkripsi
-	if err := srv.ListenAndServeTLS("certs/server.crt", "certs/server.key"); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server mati secara tidak wajar: %v", err)
-	}
-}
-
-// -------- Handlers ------------
-
-func formatValidationError(err error) map[string]string {
-	errors := make(map[string]string)
-
-	// safe type assertion utk mencegah runtime panic
-	if ve, ok := err.(validator.ValidationErrors); ok {
-		for _, e := range ve {
-			errors[e.Field()] = fmt.Sprintf("Gagal pada aturan validasi %s", e.Tag())
-		}
-	} else {
-		// safe fallback
-		errors["general"] = "Terjadi kesalahan pada validasi data"
-		log.Printf("Non-validation error caught: %v", err)
-	}
-	return errors
-}
-
-func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	// filter method: endpoint ini hanya menerima get
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// set header -> set status code -> write body :
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "OK", "message": "API berfungsi normal"}`))
-}
-
-func deductWalletHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// 1. otorisasi -> ekstrak JWT CLaims dari middleware
-	claims, ok := r.Context().Value(middleware.UserContextKey).(*auth.CustomClaims)
-	if !ok {
-		http.Error(w, "Unauthorized: Gagal memvalidasi identitas", http.StatusUnauthorized)
-		return
-	}
-
-	// batasi waktu eksekusi DB
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-	defer cancel()
-
-	// 2. atomicity -> mulai transaksi database
-	tx, err := db.Conn.BeginTx(ctx, nil)
+	log.Println("Secure IAM API berjalan di jalur TERENKRIPSI port :8443...")
+	err := server.ListenAndServeTLS("certs/server.crt", "certs/server.key")
 	if err != nil {
-		log.Printf("Gagal memulai transaksi: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
+		log.Fatalf("Server gagal dijalankan: %v", err)
 	}
-	// mekanisme pengaman -> jika fungsi ini return karena error sebelum tx.Commit di panggil,
-	// tx.Rollback() akan tereksekusi dan membatalkan perubahan di memori sementara
-	defer tx.Rollback()
-
-	// 3. ambil id pengguna dari DB berdasarkan JWT username
-	var userID int
-	err = tx.QueryRowContext(ctx, "SELECT id FROM users WHERE username = $1", claims.Username).Scan(&userID)
-	if err != nil {
-		http.Error(w, "User tidak ditemukan di database", http.StatusNotFound)
-		return
-	}
-
-	// 4. TOCTOU mitigation utk mengatasi ekspoitasi Race Condition
-	var currentBalance int
-	err = tx.QueryRowContext(ctx, "SELECT balance FROM wallets WHERE user_id = $1 FOR UPDATE", userID).Scan(&currentBalance)
-	if err != nil {
-		http.Error(w, "Dompet tidak ditemukan", http.StatusNotFound)
-		return
-	}
-
-	// 5. Cek Saldo -> time of check
-	deductAmount := 100
-	if currentBalance < deductAmount {
-		http.Error(w, "Bad Request: Saldo tidak mencukupi", http.StatusBadRequest)
-		return // memicu rollback
-	}
-
-	// 6. Potong saldo -> time of use
-	newBalance := currentBalance - deductAmount
-	_, err = tx.ExecContext(ctx, "UPDATE wallets SET balance = $1 WHERE user_id = $2", newBalance, userID)
-	if err != nil {
-		log.Printf("Gagal memotong saldo: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return // memicu rollback
-	}
-
-	// 7. Menulis data
-	if err = tx.Commit(); err != nil {
-		log.Printf("Gagal melakukan commit transaksi: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "success",
-		"message": fmt.Sprintf("Saldo berhasil di potong %d, Sisa saldo: %d", deductAmount, newBalance),
-	})
-}
-
-// pemetaan JSON req dari client
-type RegisterRequest struct {
-	Username string `json:"username" validate:"required,alphanum,min=4,max=32"`
-	Password string `json:"password" validate:"required,min=8"`
-}
-
-func registerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// parsing payload JSON dari client
-	var req RegisterRequest
-	// limit body size
-	r.Body = http.MaxBytesReader(w, r.Body, 1048576) // max 1 MB
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad Request: Format JSON tidak valid", http.StatusBadRequest)
-		return
-	}
-
-	// validasi dasar
-	//	if req.Username == "" || len(req.Password) < 6 {
-	//		http.Error(w, "Bad Request: Username kosong atau password kurang dari 4 karakter", http.StatusBadRequest)
-	//		return
-	//	}
-	// Security validator
-	if err := validate.Struct(req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnprocessableEntity) // http 422
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   "Validasi Input Gagal",
-			"details": formatValidationError(err),
-		})
-		return
-	}
-
-	// batasi waktu eksekusi DB
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-	defer cancel()
-
-	// cek ketersediaan user menggunakan parameterized query
-	var exists bool
-	checkQuery := "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)"
-	err := db.Conn.QueryRowContext(ctx, checkQuery, req.Username).Scan(&exists)
-	if err != nil {
-		log.Printf("Database error: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	if exists {
-		http.Error(w, "Conflict: Username sudah terdaftar", http.StatusConflict)
-		return
-	}
-
-	// kriptografi
-	hashedPassword, err := auth.HashPassword(req.Password)
-	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// simpan user ke database dan ambil ID menggunakan RETURN
-	var userID int
-	insertUserQuery := "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id"
-	err = db.Conn.QueryRowContext(ctx, insertUserQuery, req.Username, hashedPassword, "user").Scan(&userID)
-	if err != nil {
-		log.Printf("Database error: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// buat wallet otomatis untuk user baru agar memiliki relasi (foreign key)
-	// saldo awal: 1000
-	insertWalletQuery := "INSERT INTO wallets (user_id, balance) VALUES ($1, $2)"
-	_, err = db.Conn.ExecContext(ctx, insertWalletQuery, userID, 1000)
-	if err != nil {
-		log.Printf("Database error: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// respons
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "User berhasil didaftarkan",
-	})
-}
-
-type LoginRequest struct {
-	Username string `json:"username" validate:"required,alphanum,min=4,max=32"`
-	Password string `json:"password" validate:"required"`
-}
-
-func loginHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// parsing payload JSON
-	var req LoginRequest
-	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-
-	// Security Validator
-	if err := validate.Struct(req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnprocessableEntity) // http 422
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   "Validasi Input Gagal",
-			"details": formatValidationError(err),
-		})
-		return
-	}
-
-	// tempat menampung data dari baris database
-	var dbUsername string
-	var dbPasswordHash string
-	var dbRole string
-
-	// batasi waktu eksekusi db
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-	defer cancel()
-
-	// query data berdasarkan satu parameter ($1)
-	loginQuery := "SELECT username, password_hash, role FROM users WHERE username = $1"
-	err := db.Conn.QueryRowContext(ctx, loginQuery, req.Username).Scan(&dbUsername, &dbPasswordHash, &dbRole)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "Kredensial tidak valid", http.StatusUnauthorized)
-			return
-		}
-		log.Printf("Database error: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// validasi password
-	if !auth.CheckPasswordHash(req.Password, dbPasswordHash) {
-		http.Error(w, "Kredensial tidak valid", http.StatusUnauthorized)
-		return
-	}
-
-	// generate JWT
-	tokenString, err := auth.GenerateJWT(dbUsername, dbRole)
-	if err != nil {
-		http.Error(w, "Gagal membuat sesi", http.StatusInternalServerError)
-		return
-	}
-
-	// secure session managament
-	// tokennya tdk di kirim via JSON body, melainkan via Cookie yg dikunci
-	http.SetCookie(w, &http.Cookie{
-		Name:     "access_token",
-		Value:    tokenString,
-		Expires:  time.Now().Add(1 * time.Hour),
-		HttpOnly: true, // tdk bisa di baca javascript -> mitigasi XSS
-		Secure:   true, // sudah menggunakan HTTPS (tls)
-		SameSite: http.SameSiteStrictMode,
-		Path:     "/",
-	})
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Login berhasil",
-	})
 }

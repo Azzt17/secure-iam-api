@@ -39,7 +39,7 @@ Sistem ini menerapkan prinsip _Zero Trust_ dan diarsiteki dengan 7 lapisan perta
 7. **Encrypted Tunnel (Transport Layer)**  
    Konfigurasi `tls.Config` kustom yang secara eksplisit menonaktifkan protokol usang (TLS 1.0/1.1) dan memaksa koneksi HTTPS menggunakan mekanisme kriptografi modern.
 
-8. Layered Architecture & Dependency Injection (Clean Code)
+8. **Layered Architecture & Dependency Injection (Clean Code)**
    Sistem dipisahkan secara ketat menjadi 3 lapisan (Handler, Service, Repository). Pemisahan tanggung jawab (Separation of Concerns) ini dicapai melalui injeksi antarmuka (Interface Injection), membuat logika bisnis terisolasi dari protokol HTTP dan kueri SQL.
 
 ---

@@ -3,7 +3,6 @@ package auth
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -22,7 +21,7 @@ func GenerateJWT(username, role string) (string, error) {
 	// ambil secret key dari env secara dinamis
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		log.Fatal("FATAL: JWT_SECRET tidak dikonfigurasi di environment!")
+		return "", errors.New("server misconfiguration: missing jwt secret")
 	}
 
 	claims := &CustomClaims{

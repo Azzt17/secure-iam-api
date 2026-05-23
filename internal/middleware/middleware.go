@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net"
 	"net/http"
@@ -43,10 +45,16 @@ func Recover(next http.Handler) http.Handler {
 }
 
 // Middleware 2: Request ID (Traceability)
+func generateRandomID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// simulasi pembuatan UUID, di prod gunakan library google/uuid
-		reqID := "REQ-" + time.Now().Format("150405.000")
+		reqID := "REQ-" + generateRandomID()
 
 		// memasukkan ID kedalam context
 		ctx := context.WithValue(r.Context(), RequestIDkey, reqID)
@@ -127,41 +135,84 @@ type RateLimiter struct {
 }
 
 // Global instance utk rate limter (allow 5 request per ip)
-var limiter = &RateLimiter{
-	visitor: make(map[string]int),
-}
+//var limiter = &RateLimiter{
+//	visitor: make(map[string]int),
+//}
 
 // simulasi reset limiter per 10 detik (di prod bisa pke Redis)
-func init() {
+//func init() {
+//	go func() {
+//		for {
+//			time.Sleep(10 * time.Second)
+//			limiter.mu.Lock()
+//			limiter.visitor = make(map[string]int) // reset map
+//			limiter.mu.Unlock()
+//		}
+//	}()
+//}
+
+//func RateLimit(next http.Handler) http.Handler {
+//	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//		// mengambil ip, di prod cek juga X-Forwarded-For kalau pakai Nginx/Cloudflare
+//		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+//		if err != nil {
+//			ip = r.RemoteAddr
+//		}
+//
+//		limiter.mu.Lock()
+//		limiter.visitor[ip]++
+//		count := limiter.visitor[ip]
+//		limiter.mu.Unlock()
+//
+//		// jika req lebih dari 5 dalam 10 detik, di tolak
+//		if count > 5 {
+//			http.Error(w, "Rate limit exceeded. Coba lagi nanti.", http.StatusTooManyRequests)
+//			return
+//		}
+//
+//		next.ServeHTTP(w, r)
+//	})
+//}
+
+func NewRateLimiter(ctx context.Context) func(http.Handler) http.Handler {
+	limiter := &RateLimiter{
+		visitor: make(map[string]int),
+	}
+
+	// Goroutine pembersih sekarang terikat dengan Context!
+	// Jika server mati (ctx.Done), goroutine ini akan ikut mati dengan rapi
 	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
 		for {
-			time.Sleep(10 * time.Second)
-			limiter.mu.Lock()
-			limiter.visitor = make(map[string]int) // reset map
-			limiter.mu.Unlock()
+			select {
+			case <-ticker.C:
+				limiter.mu.Lock()
+				limiter.visitor = make(map[string]int)
+				limiter.mu.Unlock()
+			case <-ctx.Done():
+				return // Keluar dari loop saat server dimatikan
+			}
 		}
 	}()
-}
 
-func RateLimit(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// mengambil ip, di prod cek juga X-Forwarded-For kalau pakai Nginx/Cloudflare
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				ip = r.RemoteAddr
+			}
 
-		limiter.mu.Lock()
-		limiter.visitor[ip]++
-		count := limiter.visitor[ip]
-		limiter.mu.Unlock()
+			limiter.mu.Lock()
+			limiter.visitor[ip]++
+			count := limiter.visitor[ip]
+			limiter.mu.Unlock()
 
-		// jika req lebih dari 5 dalam 10 detik, di tolak
-		if count > 5 {
-			http.Error(w, "Rate limit exceeded. Coba lagi nanti.", http.StatusTooManyRequests)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
+			if count > 5 {
+				http.Error(w, "Rate limit exceeded. Coba lagi nanti.", http.StatusTooManyRequests)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

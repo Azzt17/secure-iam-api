@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"secure-iam-api/internal/db"
@@ -20,6 +24,11 @@ func main() {
 	db.InitDB()
 	defer db.Conn.Close()
 
+	// validasi jwt secret key
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("FATAL: JWT_SECRET tidak dikonfigurasi di environtment")
+	}
+
 	// Inisialisasi Validator
 	validate := validator.New()
 
@@ -34,25 +43,35 @@ func main() {
 	// Konfigurasi Router (ServeMux)
 	mux := http.NewServeMux()
 
+	// Endpoint Health
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	// context utk rate limiter
+	ctx := context.Background()
+	rateLimiter := middleware.NewRateLimiter(ctx)
+
 	// Rute Publik (Dilindungi Rate Limiter)
-	mux.Handle("/register", middleware.RateLimit(http.HandlerFunc(iamHandler.Register)))
-	mux.Handle("/login", middleware.RateLimit(http.HandlerFunc(iamHandler.Login)))
+	mux.Handle("/register", rateLimiter(http.HandlerFunc(iamHandler.Register)))
+	mux.Handle("/login", rateLimiter(http.HandlerFunc(iamHandler.Login)))
 
 	// Rute Privat (Dilindungi Rate Limiter + JWT Gatekeeper)
-	mux.Handle("/wallet/deduct", middleware.RateLimit(middleware.RequireAuth(http.HandlerFunc(iamHandler.DeductWallet))))
+	mux.Handle("/wallet/deduct", rateLimiter(middleware.RequireAuth(http.HandlerFunc(iamHandler.DeductWallet))))
 
 	// Dekorasi Layer 7 Terakhir (Security Headers, CORS, Panic Recovery, Logger)
 	var finalHandler http.Handler = mux
 	finalHandler = middleware.SecurityHeaders(finalHandler)
 	finalHandler = middleware.CORS(finalHandler)
 	finalHandler = middleware.Recover(finalHandler)
+	finalHandler = middleware.RequestID(finalHandler)
 	finalHandler = middleware.Logger(finalHandler)
 
 	// Konfigurasi Transport (TLS)
 	tlsConfig := &tls.Config{
-		MinVersion:               tls.VersionTLS12,
-		PreferServerCipherSuites: true,
-		CurvePreferences:         []tls.CurveID{tls.X25519, tls.CurveP256},
+		MinVersion:       tls.VersionTLS12,
+		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256},
 		CipherSuites: []uint16{
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
@@ -72,9 +91,26 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 	}
 
-	log.Println("Secure IAM API berjalan di jalur TERENKRIPSI port :8443...")
-	err := server.ListenAndServeTLS("certs/server.crt", "certs/server.key")
-	if err != nil {
-		log.Fatalf("Server gagal dijalankan: %v", err)
+	go func() {
+		log.Println("Secure IAM API berjalan di jalur TERENKRIPSI port :8443...")
+		if err := server.ListenAndServeTLS("certs/server.crt", "certs/server.key"); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server gagal dijalankan: %v", err)
+		}
+	}()
+
+	// graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Sinyal penghentian diterima. Mematikan server secara perlahan (Graceful Shutdown)...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server dipaksa mati karena timeout: %v", err)
 	}
+
+	log.Println("Server berhasil dihentikan dengan aman.")
 }

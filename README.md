@@ -39,6 +39,9 @@ Sistem ini menerapkan prinsip _Zero Trust_ dan diarsiteki dengan 7 lapisan perta
 7. **Encrypted Tunnel (Transport Layer)**  
    Konfigurasi `tls.Config` kustom yang secara eksplisit menonaktifkan protokol usang (TLS 1.0/1.1) dan memaksa koneksi HTTPS menggunakan mekanisme kriptografi modern.
 
+8. Layered Architecture & Dependency Injection (Clean Code)
+   Sistem dipisahkan secara ketat menjadi 3 lapisan (Handler, Service, Repository). Pemisahan tanggung jawab (Separation of Concerns) ini dicapai melalui injeksi antarmuka (Interface Injection), membuat logika bisnis terisolasi dari protokol HTTP dan kueri SQL.
+
 ---
 
 ## 📂 Struktur Repositori Standar Industri
@@ -48,11 +51,15 @@ Sistem ini menerapkan prinsip _Zero Trust_ dan diarsiteki dengan 7 lapisan perta
 ├── certs/                      # Sertifikat TLS (Diabaikan di .git)
 ├── cmd/
 │   └── api/
-│       └── main.go             # Entry point, TLS Config, dan Registrasi Router
+│       └── main.go             # Entry point, Dependency Injection (DI) Container, & Router
 ├── internal/
 │   ├── auth/                   # Engine Kriptografi: Bcrypt Hashing & JWT
 │   ├── db/                     # Konfigurasi PostgreSQL Connection Pool
-│   └── middleware/             # Layer 7 Firewalls (RateLimit, CORS, Headers, Gatekeeper)
+│   ├── domain/                 # Entitas Murni & Definisi Error Sentral (Tanpa dependensi eksternal)
+│   ├── handler/                # Layer 1: HTTP Resepsionis (Parsing JSON & Response Formatting)
+│   ├── middleware/             # Layer 7 Firewalls (RateLimit, CORS, Headers, Gatekeeper)
+│   ├── repository/             # Layer 3: Interaksi Database Raw SQL (PostgreSQL & Mocking)
+│   └── service/                # Layer 2: Pusat Logika Bisnis & Pengujian Terisolasi
 ├── migrations/                 # Skema Database (Infrastructure as Code / golang-migrate)
 ├── .env                        # Kredensial Database & Secret (Diabaikan di .git)
 ├── go.mod
@@ -162,6 +169,17 @@ Berondong server dengan cepat. Pada request ke-6, Anda akan diblokir dengan HTTP
 
 ```bash
 for i in {1..6}; do curl -k -i -X GET https://localhost:8443/health; echo ""; done
+```
+
+### 5. Pengujian Terisolasi (Unit Testing & Mocking)
+
+Sistem ini menggunakan teknik _Functional Mocking_ pada lapisan _Repository_ untuk menguji logika bisnis di _Service Layer_ secara terisolasi, tanpa memerlukan koneksi ke database nyata.
+
+Jalankan pengujian untuk memverifikasi jalur sukses dan skenario _error_ (seperti saldo tidak mencukupi):
+
+```bash
+go test -v ./internal/service
+# Output: Skenario sukses dan gagal tervalidasi dalam hitungan milidetik (< 0.01s)
 ```
 
 ---

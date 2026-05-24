@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -38,7 +38,7 @@ func Recover(next http.Handler) http.Handler {
 			if err := recover(); err != nil {
 				// melakukan recover agar server tdk mati dan mencatat log internal
 				// bukan di kembalikan ke stack trace user
-				log.Printf("[PANIC RECOVERED: %v]", err)
+				slog.Error("[PANIC RECOVERED", "panic_detail", err)
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}
 		}()
@@ -71,26 +71,48 @@ func RequestID(next http.Handler) http.Handler {
 	})
 }
 
-// Middleware 3: Logging
+// Middleware 3: Secure-Logging
+// Struct untuk menangkap status kode HTTP
+type responseRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+// Menimpa metode WriteHeader bawaan untuk mencatat status sebelum dikirim
+func (rec *responseRecorder) WriteHeader(statusCode int) {
+	rec.statusCode = statusCode
+	rec.ResponseWriter.WriteHeader(statusCode)
+}
+
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// mengekstrak req id dari context
 		reqID := r.Context().Value(RequestIDkey)
 		if reqID == nil {
 			reqID = "unknown"
 		}
 
-		// kirim ke handler utama
-		next.ServeHTTP(w, r)
+		// 1. Pasang penyadap ke ResponseWriter, set default asumsikan 200 OK
+		rec := &responseRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 
-		// catat setelah handler utama selesai
+		// 2. Kirim penyadap ini ke layer selanjutnya (bukan w yang asli)
+		next.ServeHTTP(rec, r)
+
+		// 3. Catat setelah selesai
 		durasi := time.Since(start)
 		cleanPath := strings.ReplaceAll(r.URL.Path, "\n", "")
 		cleanPath = strings.ReplaceAll(cleanPath, "\r", "")
-		// #nosec G706 -- False Positive: r.URL.Path sudah disanitisasi secara eksplisit di atas
-		log.Printf("[LOG] ID: %s | %s %q | Durasi: %v", reqID, r.Method, cleanPath, durasi)
+
+		// 4. Tambahkan metrik kritikal: status_code
+		slog.Info(
+			"HTTP Request",
+			"request_id", reqID,
+			"method", r.Method,
+			"path", cleanPath,
+			"status_code", rec.statusCode, // <--- METRIK BARU YANG KRITIS
+			"duration_ms", durasi.Milliseconds(),
+		)
 	})
 }
 

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -37,7 +37,7 @@ func formatValidationError(err error) map[string]string {
 		}
 	} else {
 		errorsMap["general"] = "Terjadi kesalahan pada validasi data"
-		log.Printf("Non-validation error caught: %v", err)
+		slog.Error("Non-validation error caught", "error", err.Error())
 	}
 	return errorsMap
 }
@@ -80,7 +80,7 @@ func (h *IAMHandler) Register(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Conflict: Username sudah terdaftar", http.StatusConflict)
 			return
 		}
-		log.Printf("Register error: %v", err)
+		slog.Error("Register error", "error", err.Error())
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -150,7 +150,7 @@ func (h *IAMHandler) DeductWallet(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Bad Request: Saldo tidak mencukupi", http.StatusBadRequest)
 			return
 		}
-		log.Printf("Deduct error: %v", err)
+		slog.Error("Deduct error", "error", err.Error())
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

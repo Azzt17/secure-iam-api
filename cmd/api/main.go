@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,22 +15,28 @@ import (
 	"secure-iam-api/internal/middleware"
 	"secure-iam-api/internal/repository"
 	"secure-iam-api/internal/service"
+	"secure-iam-api/pkg/logger"
 
 	"github.com/go-playground/validator/v10"
 )
 
 func main() {
+	// Inisialisasi Secure Logger
+	logger.Init()
+	slog.Info("Memulai proses Inisialisasi Secure IAM API...")
+
 	// Inisialisasi Database
 	db.InitDB()
 	defer func() {
 		if err := db.Conn.Close(); err != nil {
-			log.Printf("Gagal menutup koneksi database: %v", err)
+			slog.Error("Gagal menutup koneksi database", "error", err.Error())
 		}
 	}()
 
 	// validasi jwt secret key
 	if os.Getenv("JWT_SECRET") == "" {
-		log.Fatal("FATAL: JWT_SECRET tidak dikonfigurasi di environtment")
+		slog.Error("FATAL: JWT_SECRET tidak dikonfigurasi di environtment")
+		os.Exit(1)
 	}
 
 	// Inisialisasi Validator
@@ -66,11 +72,11 @@ func main() {
 
 	// Dekorasi Layer 7 Terakhir (Security Headers, CORS, Panic Recovery, Logger)
 	var finalHandler http.Handler = mux
-	finalHandler = middleware.SecurityHeaders(finalHandler)
-	finalHandler = middleware.CORS(finalHandler)
-	finalHandler = middleware.Recover(finalHandler)
-	finalHandler = middleware.RequestID(finalHandler)
 	finalHandler = middleware.Logger(finalHandler)
+	finalHandler = middleware.RequestID(finalHandler)
+	finalHandler = middleware.CORS(finalHandler)
+	finalHandler = middleware.SecurityHeaders(finalHandler)
+	finalHandler = middleware.Recover(finalHandler)
 
 	// Konfigurasi Transport (TLS)
 	tlsConfig := &tls.Config{
@@ -96,9 +102,9 @@ func main() {
 	}
 
 	go func() {
-		log.Println("Secure IAM API berjalan di jalur TERENKRIPSI port :8443...")
+		slog.Info("Secure IAM API berjalan di jalur TERENKRIPSI", "port", ":8443")
 		if err := server.ListenAndServeTLS("certs/server.crt", "certs/server.key"); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server gagal dijalankan: %v", err)
+			slog.Error("Server gagal dijalankan", "error", err.Error())
 		}
 	}()
 
@@ -107,7 +113,7 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Sinyal penghentian diterima. Mematikan server secara perlahan (Graceful Shutdown)...")
+	slog.Info("Sinyal penghentian diterima. Mematikan server secara perlahan (Graceful Shutdown)...")
 
 	// picu pembatalan root context
 	rootCancel()
@@ -116,8 +122,8 @@ func main() {
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server dipaksa mati karena timeout: %v", err)
+		slog.Error("Server dipaksa mati karena timeout", "error", err.Error())
 	}
 
-	log.Println("Server berhasil dihentikan dengan aman.")
+	slog.Info("Server berhasil dihentikan dengan aman.")
 }

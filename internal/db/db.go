@@ -3,7 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -17,7 +17,7 @@ var Conn *sql.DB
 func InitDB() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("WARNING: File .env tidak ditemukan, menggunakan environment variabel OS")
+		slog.Info("WARNING: File .env tidak ditemukan, menggunakan environment variabel OS")
 	}
 
 	dsn := fmt.Sprintf(
@@ -32,7 +32,7 @@ func InitDB() {
 
 	Conn, err = sql.Open("postgres", dsn)
 	if err != nil {
-		log.Fatalf("Kesalahan inisialisasi database: %v", err)
+		slog.Error("Kesalahan inisialisasi database", "error", err.Error())
 	}
 
 	// Connection Pool Architecture
@@ -46,8 +46,8 @@ func InitDB() {
 	Conn.SetConnMaxLifetime(15 * time.Minute)
 
 	if err = Conn.Ping(); err != nil {
-		log.Fatalf("Gagal menghubungi PostgresSQL: %v", err)
+		slog.Error("Gagal menghubungi PostgresSQL", "error", err.Error())
 	}
 
-	log.Println("Koneksi PostgresSQL berhasil diamankan!")
+	slog.Info("Koneksi PostgresSQL berhasil diamankan!")
 }

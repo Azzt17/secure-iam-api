@@ -276,6 +276,17 @@ Alur inspeksi keamanan berjalan secara berurutan:
 5. **Container Security (Trivy Image):** Setelah _image_ Docker berbasis _distroless_ selesai dibangun, Trivy kembali memindai hasil akhir _image_ untuk memastikan tidak ada celah di level OS atau _binary_.
 6. **Supply Chain Transparency (Syft):** _Pipeline_ secara otomatis mengekstrak **SBOM (Software Bill of Materials)** dalam format SPDX JSON. Ini bertindak sebagai Label yang mendata seluruh komponen di dalam _image_, sangat krusial untuk _Incident Response_ jika terjadi serangan _Zero-Day_ di masa depan.
 
+### 11. Secure Observability & Audit Logging
+
+Sistem ini membuang pencatatan log teks datar (_plaintext_) standar dan mengimplementasikan **Structured JSON Logging** menggunakan pustaka bawaan `log/slog`. Pendekatan ini dirancang untuk memfasilitasi pemantauan terpusat (seperti ELK Stack atau Datadog) sekaligus memitigasi kerentanan keamanan level pemantauan:
+
+1. **Pencegahan Log Injection (CRLF Attack):**
+   Masukan nakal dari pengguna yang berisi karakter _newline_ (`\n` atau `\r`) secara otomatis di-_escape_ oleh `JSONHandler`. Peretas tidak dapat memanipulasi log _parser_ untuk menyuntikkan baris log palsu.
+2. **Sanitasi PII (Personally Identifiable Information) Otomatis:**
+   Sistem diinjeksi dengan _middleware_ internal `ReplaceAttr` pada level _logger_. Setiap _key_ yang terdeteksi sebagai data sensitif (seperti `password`, `token`, atau `secret`) akan secara mutlak disensor menjadi `[REDACTED]`. Alamat `email` juga secara dinamis disamarkan (contoh: `f***d@example.com`) sebelum dicetak ke _stdout_, mencegah insiden kebocoran data (_Data Leak_) ke dasbor pemantauan.
+3. **Traceability & Status Interception:**
+   Setiap HTTP _request_ yang masuk dibekali dengan `request_id` unik untuk keperluan _Distributed Tracing_. Karena antarmuka standar Go tidak menyimpan _HTTP Status Code_, sistem menggunakan pola `responseRecorder` untuk menyadap dan mencatat `status_code` serta `duration_ms` di lapisan _middleware_ paling dalam. Ini memungkinkan visibilitas penuh terhadap serangan volumetrik (seperti _Rate Limit / 429 Too Many Requests_).
+
 ---
 
 _Dikembangkan sebagai bagian dari eksplorasi mendalam terhadap arsitektur backend, manajemen memori persisten, dan standar keamanan siber OWASP._

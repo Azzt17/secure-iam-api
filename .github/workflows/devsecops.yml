@@ -1,0 +1,90 @@
+name: DevSecOps Pipeline
+
+# Pipeline akan terpicu otomatis setiap ada perubahan di branch 'main'
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  # JOB 1: Keamanan Kode (SAST, SCA, Secret Scanning, Test)
+  sast-and-test:
+    name: SAST & Code Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go Environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.10"
+
+      # 1. Pemindaian Rahasia & Konfigurasi (Trivy FS)
+      - name: Secret Scanning (Trivy FS)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "table"
+          exit-code: "1" # Gagal jika menemukan rahasia (API Key, Sandi)
+          severity: "CRITICAL,HIGH"
+
+      # 2. Linter Komprehensif
+      - name: GolangCI-Lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=5m
+
+      # 3. Uji Unit & Deteksi Kebocoran Memori
+      - name: Go Test & Race Detector
+        run: go test -v -race ./...
+
+      # 4. Pemindaian Logika Keamanan (SAST)
+      - name: GoSec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: ./...
+
+      # 5. Pemindaian Kerentanan Pustaka (SCA)
+      - name: Govulncheck (SCA)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  # JOB 2: Keamanan Kontainer & SBOM (Menunggu Job 1 Sukses)
+  container-security:
+    name: Container Build & Scan
+    needs: sast-and-test # Syarat: Job 1 harus lolos 100%
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. Membangun Image Docker (Multi-stage Distroless)
+      - name: Build Docker Image
+        run: docker build -t secure-iam-api:ci-test .
+
+      # 2. Pemindaian Image Kontainer (Trivy)
+      - name: Container Image Scanning (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "secure-iam-api:ci-test"
+          format: "table"
+          exit-code: "1" # Gagal jika base image/binary memiliki CVE
+          severity: "CRITICAL,HIGH"
+
+      # 3. Instalasi Syft & Ekstraksi SBOM
+      - name: Generate SBOM (Syft)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft secure-iam-api:ci-test -o spdx-json > sbom-ci.json
+
+      # 4. Simpan SBOM sebagai Artefak yang bisa diunduh
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-iam-api
+          path: sbom-ci.json

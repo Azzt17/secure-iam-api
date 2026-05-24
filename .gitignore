@@ -5,3 +5,8 @@ certs/server.key
 cookies.txt
 
 .env
+
+cosign.key
+cosign.pub
+*.sig
+sbom-iam-api.json

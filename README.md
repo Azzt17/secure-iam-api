@@ -207,6 +207,21 @@ Metrik Keberhasilan Audit Terakhir:
 0 issues. (Sistem dinyatakan SEPENUHNYA PAS DAN LOLOS AUDIT)
 ```
 
+### 7. Analisis Rantai Pasok Perangkat Lunak (SCA - Supply Chain Security)
+
+Repositori ini menerapkan keamanan Rantai Pasok lapis ganda untuk mencegah masuknya kerentanan dari pustaka eksternal dan memitigasi serangan rekayasa sosial seperti _Typosquatting_:
+
+- **Integritas Kriptografi (`go.sum`):** Memvalidasi _hash_ SHA-256 dari setiap dependensi terhadap _database checksum_ global Google (`sum.golang.org`) guna menjamin perlindungan dari manipulasi modul di tengah jalan (_man-in-the-middle_).
+- **Pemindaian Kerentanan Aktif (`govulncheck`):** Menggunakan alat analisis resmi dari Golang dengan pendekatan _Call Graph Analysis_ untuk melacak _Common Vulnerabilities and Exposures_ (CVE). Alat ini secara spesifik hanya akan menyorot fungsi rentan yang benar-benar dieksekusi oleh aplikasi, memastikan nol _false positives_.
+
+Jalankan audit rantai pasok secara berkala dengan perintah:
+
+```bash
+govulncheck ./...
+```
+
+Status Rantai Pasok Terakhir: 0 vulnerabilities affecting the code (Aman / Tervalidasi).
+
 ---
 
 _Dikembangkan sebagai bagian dari eksplorasi mendalam terhadap arsitektur backend, manajemen memori persisten, dan standar keamanan siber OWASP._

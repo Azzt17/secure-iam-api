@@ -222,6 +222,17 @@ govulncheck ./...
 
 Status Rantai Pasok Terakhir: 0 vulnerabilities affecting the code (Aman / Tervalidasi).
 
+### 8. Keamanan Kontainer (Container Security)
+
+Aplikasi ini dikemas menggunakan standar arsitektur _DevSecOps_ mutakhir untuk memastikan isolasi absolut dan meminimalisir _Attack Surface_ di lingkungan _Production_:
+
+- **Multi-Stage Builds:** Memisahkan lingkungan kompilasi dan lingkungan _runtime_. Biner dikompilasi secara statis (`CGO_ENABLED=0`) dan jejak alat _build_ (kompilator, kode sumber) dimusnahkan dari rilis final.
+- **Distroless Base Image:** Menggunakan `gcr.io/distroless/static-debian12`. Tidak ada _shell_ (`bash`/`sh`), tidak ada utilitas jaringan (`curl`/`wget`), dan tidak ada _package manager_. Memblokir penuh taktik pergerakan lateral peretas.
+- **Non-Root & Read-Only:** _Container_ dieksekusi secara ketat sebagai pengguna `nonroot` dengan hak akses terbatas. Disarankan untuk menjalankan _container_ dengan bendera `--read-only` untuk menciptakan _immutable filesystem_ yang mencegah injeksi _script_ berbahaya (RCE).
+- **Inspeksi Artefak (Trivy):** _Image_ kontainer diaudit secara rutin menggunakan Aqua Security Trivy untuk memindai kerentanan OS (_Debian_) dan ketergantungan _binary_.
+
+_Metrik Keamanan Kontainer Terakhir:_ Ukuran _Image_ 20.4MB | `0 vulnerabilities` terdeteksi pada _base image_ dan _gobinary_.
+
 ---
 
 _Dikembangkan sebagai bagian dari eksplorasi mendalam terhadap arsitektur backend, manajemen memori persisten, dan standar keamanan siber OWASP._

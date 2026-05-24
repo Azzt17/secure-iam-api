@@ -56,7 +56,7 @@ Sistem ini menerapkan prinsip _Zero Trust_ dan diarsiteki dengan 7 lapisan perta
 │   ├── auth/                   # Engine Kriptografi: Bcrypt Hashing & JWT
 │   ├── db/                     # Konfigurasi PostgreSQL Connection Pool
 │   ├── domain/                 # Entitas Murni & Definisi Error Sentral (Tanpa dependensi eksternal)
-│   ├── handler/                # Layer 1: HTTP Resepsionis (Parsing JSON & Response Formatting)
+│   ├── handlers/                # Layer 1: HTTP Resepsionis (Parsing JSON & Response Formatting)
 │   ├── middleware/             # Layer 7 Firewalls (RateLimit, CORS, Headers, Gatekeeper)
 │   ├── repository/             # Layer 3: Interaksi Database Raw SQL (PostgreSQL & Mocking)
 │   └── service/                # Layer 2: Pusat Logika Bisnis & Pengujian Terisolasi
@@ -73,7 +73,7 @@ Sistem ini menerapkan prinsip _Zero Trust_ dan diarsiteki dengan 7 lapisan perta
 
 ### 1. Prasyarat Sistem
 
-- Go `1.20+`
+- Go `1.21+`
 - PostgreSQL `15+`
 - Utilitas `openssl`
 - CLI `golang-migrate`
@@ -81,6 +81,7 @@ Sistem ini menerapkan prinsip _Zero Trust_ dan diarsiteki dengan 7 lapisan perta
 ### 2. Konfigurasi Database (Least Privilege)
 
 Masuk ke PostgreSQL dan siapkan basis data beserta user dengan akses terbatas:
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImZhcmlkd2FqZGkiLCJyb2xlIjoidXNlciIsImV4cCI6MTc3OTYyMzA0MSwiaWF0IjoxNzc5NjE5NDQxfQ.Q6VEOuol8bMpXgdsTLH9J3Eh9Cl7-wZa8yo9VteJit4
 
 ```sql
 CREATE DATABASE iam_wallet_db;
@@ -232,6 +233,35 @@ Aplikasi ini dikemas menggunakan standar arsitektur _DevSecOps_ mutakhir untuk m
 - **Inspeksi Artefak (Trivy):** _Image_ kontainer diaudit secara rutin menggunakan Aqua Security Trivy untuk memindai kerentanan OS (_Debian_) dan ketergantungan _binary_.
 
 _Metrik Keamanan Kontainer Terakhir:_ Ukuran _Image_ 20.4MB | `0 vulnerabilities` terdeteksi pada _base image_ dan _gobinary_.
+
+### 9. Panduan Menjalankan Kontainer (Konteks Lokal)
+
+Karena kontainer ini dibangun dengan isolasi mutlak (_distroless_, _read-only_, dan _non-root_), ia tidak menyimpan kredensial atau sertifikat di dalam _image_. Semua konfigurasi harus disuntikkan secara dinamis saat _runtime_ (saat kontainer dihidupkan).
+
+Gunakan perintah di bawah ini untuk menjalankan server API secara lokal dengan aman, memastikan Anda mengeksekusinya tepat di **root direktori proyek**:
+
+```bash
+docker run --rm -it \
+  --name secure-iam-api \
+  --read-only \
+  --network host \
+  -w /app \
+  -v "$(pwd)/certs:/app/certs:ro,z" \
+  -e DB_HOST=localhost \
+  -e DB_PORT=5432 \
+  -e DB_USER=iam_app \
+  -e DB_PASSWORD=<your_dbpassword> \
+  -e DB_NAME=iam_wallet_db \
+  -e DB_SSLMODE=require/disable \
+  -e JWT_SECRET="<your_jwt_secret>" \
+  secure-iam-api:v1
+```
+
+Anatomi Perintah Keamanan:
+--read-only: Mengunci filesystem kontainer agar tidak dapat ditulisi (mencegah modifikasi malware).
+--network host: Membuka akses jaringan agar kontainer dapat berkomunikasi dengan PostgreSQL di mesin lokal.
+-w /app: Menetapkan direktori kerja yang spesifik untuk akurasi pencarian path sertifikat.
+-v ... :ro,z: Melakukan mounting sertifikat TLS secara Read-Only (ro) dan menyuntikkan label izin khusus SELinux (z) agar kontainer non-root diizinkan membaca file dari OS Host.
 
 ---
 

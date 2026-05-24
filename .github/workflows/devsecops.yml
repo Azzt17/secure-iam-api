@@ -33,10 +33,9 @@ jobs:
 
       # 2. Linter Komprehensif
       - name: GolangCI-Lint
-        uses: golangci/golangci-lint-action@v4
-        with:
-          version: latest
-          args: --timeout=5m
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          golangci-lint run --timeout=5m
 
       # 3. Uji Unit & Deteksi Kebocoran Memori
       - name: Go Test & Race Detector

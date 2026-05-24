@@ -23,10 +23,13 @@ func RequireAuth(next http.Handler) http.Handler {
 		if err != nil {
 			// force logout jika token di manipulasi/expired
 			http.SetCookie(w, &http.Cookie{
-				Name:   "access_token",
-				Value:  "",
-				MaxAge: -1,
-				Path:   "/",
+				Name:     "access_token",
+				Value:    "",
+				MaxAge:   -1,
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   true,
+				SameSite: http.SameSiteStrictMode,
 			})
 			http.Error(w, "Unauthorized: Sesi tidak valid atau telah berakhir", http.StatusUnauthorized)
 			return

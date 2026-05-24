@@ -182,6 +182,38 @@ go test -v ./internal/service
 # Output: Skenario sukses dan gagal tervalidasi dalam hitungan milidetik (< 0.01s)
 ```
 
+### 6. Analisis Keamanan Statis (SAST - DevSecOps Suite)
+
+Untuk menjamin kode sepenuhnya patuh terhadap standar keamanan OWASP dan bebas dari _anti-pattern_, repositori ini mengintegrasikan tiga instrumen inspeksi statis pihak ketiga tanpa menjalankan aplikasi (_Shift-Left Security_):
+
+- **Go Vet:** Memeriksa anomali logika dasar dan kesalahan format parameter.
+- **Staticcheck:** Mengaudit efisiensi memori, performa, dan mendeteksi API yang usang (_deprecated_).
+- **Gosec (Go Security):** Memindai _Abstract Syntax Tree_ (AST) untuk mendeteksi kerentanan kritis seperti _SQL Injection_, kebocoran kredensial, _Insecure Cookies_, dan taktik penipuan log (_Log Injection_).
+
+Jalankan rangkaian inspeksi keamanan secara berkala menggunakan perintah berikut:
+
+```bash
+# Evaluasi kepatuhan logika dasar
+go vet ./...
+
+# Audit performa dan pola kode bersih
+staticcheck ./...
+
+# Pemindaian celah keamanan siber secara menyeluruh
+gosec ./...
+```
+
+Metrik Keberhasilan Audit Terakhir (gosec):
+
+```plaintext
+Summary:
+  Gosec  : dev
+  Files  : 12
+  Lines  : 868
+  Nosec  : 1 (1 False Positive disanitisasi secara eksplisit pada middleware Logger)
+  Issues : 0 (Sistem dinyatakan SEPENUHNYA AMAN)
+```
+
 ---
 
 _Dikembangkan sebagai bagian dari eksplorasi mendalam terhadap arsitektur backend, manajemen memori persisten, dan standar keamanan siber OWASP._

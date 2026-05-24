@@ -69,7 +69,7 @@ func (h *IAMHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if err := h.validate.Struct(req); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Validasi Gagal", "details": formatValidationError(err)})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "Validasi Gagal", "details": formatValidationError(err)})
 		return
 	}
 
@@ -87,7 +87,7 @@ func (h *IAMHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "User berhasil didaftarkan"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "User berhasil didaftarkan"})
 }
 
 func (h *IAMHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +106,7 @@ func (h *IAMHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if err := h.validate.Struct(req); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Validasi Gagal", "details": formatValidationError(err)})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "Validasi Gagal", "details": formatValidationError(err)})
 		return
 	}
 
@@ -128,7 +128,7 @@ func (h *IAMHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Login berhasil"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Login berhasil"})
 }
 
 func (h *IAMHandler) DeductWallet(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +156,7 @@ func (h *IAMHandler) DeductWallet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
 		"message": fmt.Sprintf("Saldo berhasil dipotong. Sisa: %d", newBalance),
 	})

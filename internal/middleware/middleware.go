@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -86,7 +87,10 @@ func Logger(next http.Handler) http.Handler {
 
 		// catat setelah handler utama selesai
 		durasi := time.Since(start)
-		log.Printf("[LOG] ID: %s | %s %s | Durasi: %v", reqID, r.Method, r.URL.Path, durasi)
+		cleanPath := strings.ReplaceAll(r.URL.Path, "\n", "")
+		cleanPath = strings.ReplaceAll(cleanPath, "\r", "")
+		// #nosec G706 -- False Positive: r.URL.Path sudah disanitisasi secara eksplisit di atas
+		log.Printf("[LOG] ID: %s | %s %q | Durasi: %v", reqID, r.Method, cleanPath, durasi)
 	})
 }
 

@@ -263,6 +263,19 @@ Anatomi Perintah Keamanan:
 -w /app: Menetapkan direktori kerja yang spesifik untuk akurasi pencarian path sertifikat.
 -v ... :ro,z: Melakukan mounting sertifikat TLS secara Read-Only (ro) dan menyuntikkan label izin khusus SELinux (z) agar kontainer non-root diizinkan membaca file dari OS Host.
 
+### 10. CI/CD Security Pipeline (Otomatisasi DevSecOps)
+
+Proyek ini dilengkapi dengan ban berjalan terotomatisasi (_pipeline_) menggunakan **GitHub Actions** (`.github/workflows/devsecops.yml`). Pipeline ini dirancang dengan filosofi _Fail Fast, Fail Cheap_ untuk menolak kode yang tidak aman sedini mungkin sebelum mencapai tahap _build_.
+
+Alur inspeksi keamanan berjalan secara berurutan:
+
+1. **Secret Scanning (Trivy FS):** Memblokir _pipeline_ jika terdapat _hardcoded credentials_ (seperti API Key atau sandi) di dalam kode sumber.
+2. **Linting & Code Quality:** Menggunakan `go vet` dan `staticcheck` untuk memastikan kode bebas dari kejanggalan sintaks dan memenuhi standar idiomatis Go yang tangguh.
+3. **SAST (GoSec):** Menganalisis kelemahan logika keamanan pada kode (misal: _SQL Injection_, kelemahan kriptografi) tanpa harus mengeksekusi aplikasi.
+4. **SCA (Govulncheck):** Memeriksa seluruh hierarki pustaka pihak ketiga (_dependencies_) terhadap _database_ kerentanan (_CVE_) nasional.
+5. **Container Security (Trivy Image):** Setelah _image_ Docker berbasis _distroless_ selesai dibangun, Trivy kembali memindai hasil akhir _image_ untuk memastikan tidak ada celah di level OS atau _binary_.
+6. **Supply Chain Transparency (Syft):** _Pipeline_ secara otomatis mengekstrak **SBOM (Software Bill of Materials)** dalam format SPDX JSON. Ini bertindak sebagai Label yang mendata seluruh komponen di dalam _image_, sangat krusial untuk _Incident Response_ jika terjadi serangan _Zero-Day_ di masa depan.
+
 ---
 
 _Dikembangkan sebagai bagian dari eksplorasi mendalam terhadap arsitektur backend, manajemen memori persisten, dan standar keamanan siber OWASP._

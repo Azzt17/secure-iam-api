@@ -55,7 +55,9 @@ func (r *postgresRepo) DeductWalletBalance(ctx context.Context, userID int, dedu
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	var currentBalance int
 	// TOCTOU Mitigation & Row-Level Locking

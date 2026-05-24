@@ -22,7 +22,11 @@ import (
 func main() {
 	// Inisialisasi Database
 	db.InitDB()
-	defer db.Conn.Close()
+	defer func() {
+		if err := db.Conn.Close(); err != nil {
+			log.Printf("Gagal menutup koneksi database: %v", err)
+		}
+	}()
 
 	// validasi jwt secret key
 	if os.Getenv("JWT_SECRET") == "" {

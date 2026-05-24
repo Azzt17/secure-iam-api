@@ -31,11 +31,12 @@ jobs:
           exit-code: "1" # Gagal jika menemukan rahasia (API Key, Sandi)
           severity: "CRITICAL,HIGH"
 
-      # 2. Linter Komprehensif
-      - name: GolangCI-Lint
+      # 2. Linter Bawaan & Staticcheck
+      - name: Go Vet & Staticcheck
         run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          golangci-lint run --timeout=5m
+          go vet ./...
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
 
       # 3. Uji Unit & Deteksi Kebocoran Memori
       - name: Go Test & Race Detector

@@ -182,36 +182,29 @@ go test -v ./internal/service
 # Output: Skenario sukses dan gagal tervalidasi dalam hitungan milidetik (< 0.01s)
 ```
 
-### 6. Analisis Keamanan Statis (SAST - DevSecOps Suite)
+### 6. Analisis Keamanan Statis & Orkestrasi Linter (SAST - DevSecOps Suite)
 
-Untuk menjamin kode sepenuhnya patuh terhadap standar keamanan OWASP dan bebas dari _anti-pattern_, repositori ini mengintegrasikan tiga instrumen inspeksi statis pihak ketiga tanpa menjalankan aplikasi (_Shift-Left Security_):
+Untuk menjamin kode sepenuhnya patuh terhadap standar keamanan OWASP, bersih dari _anti-pattern_, dan efisien dalam manajemen memori, repositori ini mengintegrasikan **`golangci-lint` (Skema Versi 2)** sebagai agregator dan konduktor otomatis untuk menjalankan rangkaian inspeksi statis berikut secara paralel:
 
-- **Go Vet:** Memeriksa anomali logika dasar dan kesalahan format parameter.
-- **Staticcheck:** Mengaudit efisiensi memori, performa, dan mendeteksi API yang usang (_deprecated_).
-- **Gosec (Go Security):** Memindai _Abstract Syntax Tree_ (AST) untuk mendeteksi kerentanan kritis seperti _SQL Injection_, kebocoran kredensial, _Insecure Cookies_, dan taktik penipuan log (_Log Injection_).
+- **govet:** Memeriksa anomali logika dasar bawaan Go dan akurasi tanda tangan fungsi.
+- **staticcheck:** Mengaudit efisiensi kode, arsitektur performa, dan mendeteksi API usang (_deprecated_).
+- **gosec:** Memindai _Abstract Syntax Tree_ (AST) untuk memburu celah keamanan kritis (Injeksi SQL, kebocoran kredensial, kelemahan kriptografi, dsb).
+- **errcheck:** Memastikan akuntabilitas penanganan _error_, memaksa kepatuhan deteksi kegagalan pada operasi _defer_ seperti `db.Close()` dan `tx.Rollback()`.
+- **ineffassign:** Mendeteksi inefisiensi alokasi variabel yang tidak pernah digunakan.
+- **bodyclose:** Mencegah risiko kebocoran memori (_resource leak_) dengan memastikan seluruh HTTP tanggapan selalu ditutup dengan benar.
 
-Jalankan rangkaian inspeksi keamanan secara berkala menggunakan perintah berikut:
+Seluruh aturan main ini dikonfigurasi secara terpusat di dalam berkas tata tertib `.golangci.yml`.
+
+Jalankan orkestrasi analisis statis tunggal ini di direktori _root_:
 
 ```bash
-# Evaluasi kepatuhan logika dasar
-go vet ./...
-
-# Audit performa dan pola kode bersih
-staticcheck ./...
-
-# Pemindaian celah keamanan siber secara menyeluruh
-gosec ./...
+golangci-lint run ./...
 ```
 
-Metrik Keberhasilan Audit Terakhir (gosec):
+Metrik Keberhasilan Audit Terakhir:
 
 ```plaintext
-Summary:
-  Gosec  : dev
-  Files  : 12
-  Lines  : 868
-  Nosec  : 1 (1 False Positive disanitisasi secara eksplisit pada middleware Logger)
-  Issues : 0 (Sistem dinyatakan SEPENUHNYA AMAN)
+0 issues. (Sistem dinyatakan SEPENUHNYA PAS DAN LOLOS AUDIT)
 ```
 
 ---

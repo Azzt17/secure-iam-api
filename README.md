@@ -287,6 +287,23 @@ Sistem ini membuang pencatatan log teks datar (_plaintext_) standar dan mengimpl
 3. **Traceability & Status Interception:**
    Setiap HTTP _request_ yang masuk dibekali dengan `request_id` unik untuk keperluan _Distributed Tracing_. Karena antarmuka standar Go tidak menyimpan _HTTP Status Code_, sistem menggunakan pola `responseRecorder` untuk menyadap dan mencatat `status_code` serta `duration_ms` di lapisan _middleware_ paling dalam. Ini memungkinkan visibilitas penuh terhadap serangan volumetrik (seperti _Rate Limit / 429 Too Many Requests_).
 
+### 12. Real-time Monitoring Infrastructure (Prometheus & Grafana)
+
+Repositori ini menyertakan infrastruktur pemantauan instan berbasis Docker Compose untuk memvisualisasikan metrik keamanan dan performa aplikasi secara _real-time_.
+
+**Cara Menjalankan Dasbor Pemantauan:**
+
+1. Pastikan API Go sedang berjalan (mendengarkan di port `:8443`).
+2. Masuk ke direktori `observability` dan jalankan orkestrasi kontainer:
+
+   ```bash
+   cd observability
+   docker compose up -d
+   ```
+
+3. Buka Grafana di <http://localhost:3000> (Kredensial bawaan: admin / admin).
+4. Grafana telah dikonfigurasi untuk secara otomatis menghisap data dari metrik Prometheus yang diekspos secara aman oleh aplikasi Go. Anda dapat memantau anomali keamanan (seperti lonjakan HTTP 401 dan 429) serta memprofilkan kesehatan goroutine melalui antarmuka visual.
+
 ---
 
 _Dikembangkan sebagai bagian dari eksplorasi mendalam terhadap arsitektur backend, manajemen memori persisten, dan standar keamanan siber OWASP._

@@ -18,6 +18,7 @@ import (
 	"secure-iam-api/pkg/logger"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -63,6 +64,9 @@ func main() {
 		_, _ = w.Write([]byte("OK"))
 	})
 
+	// Rute Internal (jangan di ekspos ke load balancer publik)
+	mux.Handle("/metrics", promhttp.Handler())
+
 	// Rute Publik (Dilindungi Rate Limiter)
 	mux.Handle("/register", rateLimiter(http.HandlerFunc(iamHandler.Register)))
 	mux.Handle("/login", rateLimiter(http.HandlerFunc(iamHandler.Login)))
@@ -73,6 +77,7 @@ func main() {
 	// Dekorasi Layer 7 Terakhir (Security Headers, CORS, Panic Recovery, Logger)
 	var finalHandler http.Handler = mux
 	finalHandler = middleware.Logger(finalHandler)
+	finalHandler = middleware.Metrics(finalHandler)
 	finalHandler = middleware.RequestID(finalHandler)
 	finalHandler = middleware.CORS(finalHandler)
 	finalHandler = middleware.SecurityHeaders(finalHandler)
